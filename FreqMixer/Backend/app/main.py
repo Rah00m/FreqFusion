@@ -1,298 +1,92 @@
-# from fastapi import FastAPI, File, UploadFile, HTTPException
-# from fastapi.middleware.cors import CORSMiddleware
-# from fastapi.responses import JSONResponse
-# import os
-# import uuid
-# from typing import List, Dict
-# import json
+"""
+FastAPI app exposing endpoints to test the Fourier Transformer pipeline via Postman.
+Endpoints: upload, calculate FT, get component, mix, cache info.
+"""
 
-# # Import our modules
-# from image_manager import ImageManager
-# from utils import JsonEncoder
+import json
+import os
+from typing import Dict, List, Optional
+import uuid 
 
-# # Initialize FastAPI app
-# app = FastAPI(
-#     title="Fourier Transform Mixer API - Phase 1",
-#     description="Image upload and resizing system",
-#     version="1.0.0"
-# )
-
-# # CORS Configuration
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:3000"],  # React frontend
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # Create uploads directory
-# UPLOAD_DIR = "uploads"
-# os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# # Initialize Image Manager
-# image_manager = ImageManager()
-
-# # Custom JSON response with numpy support
-# def json_response(data: Dict):
-#     return JSONResponse(
-#         content=json.loads(json.dumps(data, cls=JsonEncoder))
-#     )
-
-# @app.get("/")
-# async def root():
-#     return {"message": "Fourier Mixer Backend - Phase 1: Image Management"}
-
-# @app.get("/api/health")
-# async def health_check():
-#     """Health check endpoint"""
-#     return {
-#         "status": "healthy",
-#         "service": "fourier-mixer-api",
-#         "version": "1.0.0"
-#     }
-
-# @app.post("/api/upload/{image_id}")
-# async def upload_image(
-#     image_id: int,
-#     file: UploadFile = File(...)
-# ):
-#     """Upload an image (0-3)"""
-#     try:
-#         # Validate image_id
-#         if image_id not in [0, 1, 2, 3]:
-#             raise HTTPException(status_code=400, detail="Image ID must be 0-3")
-        
-#         # Read file content
-#         contents = await file.read()
-        
-#         # Load image using ImageManager
-#         result = image_manager.load_image(image_id, contents)
-        
-#         if not result.get('success', False):
-#             raise HTTPException(status_code=400, detail=result.get('error', 'Upload failed'))
-        
-#         # Save file locally (optional)
-#         filename = f"{uuid.uuid4()}_{file.filename}"
-#         filepath = os.path.join(UPLOAD_DIR, filename)
-        
-#         with open(filepath, "wb") as f:
-#             f.write(contents)
-        
-#         # Add filename to result
-#         result['filename'] = file.filename
-#         result['saved_as'] = filename
-        
-#         return json_response(result)
-        
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/images")
-# async def get_all_images():
-#     """Get all uploaded images"""
-#     try:
-#         result = image_manager.get_all_images()
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/images/{image_id}")
-# async def get_image(image_id: int):
-#     """Get specific image"""
-#     try:
-#         if image_id not in [0, 1, 2, 3]:
-#             raise HTTPException(status_code=400, detail="Image ID must be 0-3")
-        
-#         result = image_manager.get_image(image_id)
-        
-#         if result is None:
-#             return json_response({
-#                 "id": image_id,
-#                 "loaded": False,
-#                 "message": "Image not loaded"
-#             })
-        
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.delete("/api/images/{image_id}")
-# async def delete_image(image_id: int):
-#     """Delete a specific image"""
-#     try:
-#         if image_id not in [0, 1, 2, 3]:
-#             raise HTTPException(status_code=400, detail="Image ID must be 0-3")
-        
-#         result = image_manager.delete_image(image_id)
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.delete("/api/images")
-# async def delete_all_images():
-#     """Delete all images"""
-#     try:
-#         result = image_manager.delete_all_images()
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/status")
-# async def get_status():
-#     """Get system status"""
-#     try:
-#         result = image_manager.get_status()
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/api/samples")
-# async def load_sample_images():
-#     """Load 4 sample images for testing"""
-#     try:
-#         result = image_manager.load_sample_images()
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/api/resize")
-# async def resize_all_images():
-#     """Resize all images to common size"""
-#     try:
-#         result = image_manager.resize_all_to_common()
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/api/resize/{image_id}")
-# async def resize_single_image(image_id: int):
-#     """Resize specific image to common size"""
-#     try:
-#         if image_id not in [0, 1, 2, 3]:
-#             raise HTTPException(status_code=400, detail="Image ID must be 0-3")
-        
-#         result = image_manager.resize_image_to_common(image_id)
-        
-#         if result is None:
-#             raise HTTPException(status_code=400, detail="Image not loaded or no common size")
-        
-#         return json_response(result)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/common-size")
-# async def get_common_size():
-#     """Get current common size"""
-#     try:
-#         common_size = image_manager.get_common_size()
-        
-#         if common_size is None:
-#             return json_response({
-#                 "common_size": None,
-#                 "message": "No common size calculated (need at least 1 image)"
-#             })
-        
-#         return json_response({
-#             "common_size": {
-#                 "width": common_size[0],
-#                 "height": common_size[1]
-#             },
-#             "total_images": image_manager.get_loaded_count()
-#         })
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/api/stats")
-# async def get_statistics():
-#     """Get detailed statistics"""
-#     try:
-#         images_data = image_manager.get_all_images()
-#         loaded_count = image_manager.get_loaded_count()
-#         common_size = image_manager.get_common_size()
-        
-#         return json_response({
-#             "images": images_data,
-#             "statistics": {
-#                 "loaded_count": loaded_count,
-#                 "common_size": common_size,
-#                 "total_capacity": 4,
-#                 "available_slots": 4 - loaded_count
-#             }
-#         })
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(
-#         app, 
-#         host="0.0.0.0", 
-#         port=5000, 
-#         reload=True,
-#         log_level="info"
-#     )
-
-
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import os
-import uuid
-import json
+from pydantic import BaseModel, Field
 
-# استيراد من نفس المجلد
 from .image_manager import ImageManager
 from .utils import JsonEncoder
 
-# Initialize FastAPI app
+
 app = FastAPI(
-    title="Fourier Transform Mixer API - Phase 1",
-    description="Image upload and resizing system",
-    version="1.0.0"
+    title="Fourier Transform Mixer API",
+    description="Upload images, compute Fourier components, and mix them",
+    version="1.0.0",
 )
 
-# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Create uploads directory
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Initialize Image Manager
 image_manager = ImageManager()
 
-# Custom JSON response
-def json_response(data: dict):
-    return JSONResponse(
-        content=json.loads(json.dumps(data, cls=JsonEncoder))
-    )
+
+def json_response(data: Dict):
+    return JSONResponse(content=json.loads(json.dumps(data, cls=JsonEncoder)))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Prevent UnicodeDecodeError by scrubbing binary content in validation errors."""
+    def scrub(obj):
+        if isinstance(obj, bytes):
+            return f"<binary {len(obj)} bytes>"
+        if isinstance(obj, list):
+            return [scrub(x) for x in obj]
+        if isinstance(obj, dict):
+            return {k: scrub(v) for k, v in obj.items()}
+        return obj
+
+    sanitized = scrub(exc.errors())
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(sanitized)})
+
+
+class RectangleRegion(BaseModel):
+    """Rectangle definition for frequency domain selection."""
+    x: int = Field(..., ge=0, description="Top-left X coordinate")
+    y: int = Field(..., ge=0, description="Top-left Y coordinate")
+    width: int = Field(..., gt=0, description="Rectangle width")
+    height: int = Field(..., gt=0, description="Rectangle height")
+    type: str = Field("inner", pattern="^(inner|outer)$", description="inner or outer")
+
+
+class MixRequest(BaseModel):
+    weights: List[float] = Field(..., min_items=4, max_items=4, description="Weight per image")
+    rectangles: List[Optional[RectangleRegion]] = Field(..., min_items=4, max_items=4, description="Rectangle per image (null = full region)")
+    component_mode: str = Field("magnitude_phase", pattern="^(magnitude_phase|real_imaginary)$")
+    preserve_energy: bool = False
+
 
 @app.get("/")
 async def root():
-    return {"message": "Fourier Mixer Backend - Phase 1: Image Management"}
+    return {"message": "Fourier Mixer Backend"}
+
 
 @app.get("/api/health")
 async def health_check():
-    return {
-        "status": "healthy",
-        "service": "fourier-mixer-api",
-        "version": "1.0.0"
-    }
+    return {"status": "healthy", "service": "fourier-mixer-api", "version": "1.0.0"}
+
 
 @app.post("/api/upload/{image_id}")
-async def upload_image(
-    image_id: int,
-    file: UploadFile = File(...)
-):
+async def upload_image(image_id: int, file: UploadFile = File(...)):
     try:
         if image_id not in [0, 1, 2, 3]:
             raise HTTPException(status_code=400, detail="Image ID must be 0-3")
@@ -303,7 +97,7 @@ async def upload_image(
         if not result.get('success', False):
             raise HTTPException(status_code=400, detail=result.get('error', 'Upload failed'))
         
-        # Save file locally
+        # Save file locally with unique name
         filename = f"{uuid.uuid4()}_{file.filename}"
         filepath = os.path.join(UPLOAD_DIR, filename)
         
@@ -320,6 +114,25 @@ async def upload_image(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/api/images/{image_id}/grayscale")
+async def convert_image_to_grayscale(image_id: int):
+    """Convert the uploaded image to grayscale immediately (before display)."""
+    try:
+        if image_id not in [0, 1, 2, 3]:
+            raise HTTPException(status_code=400, detail="Image ID must be 0-3")
+
+        result = image_manager.convert_to_grayscale(image_id)
+        if not result.get('success', False):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Conversion failed'))
+
+        return json_response(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/images")
 async def get_all_images():
     try:
@@ -327,6 +140,7 @@ async def get_all_images():
         return json_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/images/{image_id}")
 async def get_image(image_id: int):
@@ -347,6 +161,7 @@ async def get_image(image_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.delete("/api/images/{image_id}")
 async def delete_image(image_id: int):
     try:
@@ -358,6 +173,7 @@ async def delete_image(image_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.delete("/api/images")
 async def delete_all_images():
     try:
@@ -365,6 +181,7 @@ async def delete_all_images():
         return json_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/status")
 async def get_status():
@@ -374,13 +191,7 @@ async def get_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/samples")
-async def load_sample_images():
-    try:
-        result = image_manager.load_sample_images()
-        return json_response(result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/resize")
 async def resize_all_images():
@@ -389,6 +200,7 @@ async def resize_all_images():
         return json_response(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/common-size")
 async def get_common_size():
@@ -409,3 +221,69 @@ async def get_common_size():
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ft/calculate/{image_id}")
+async def calculate_ft(image_id: int):
+    result = image_manager.calculate_ft_for_image(image_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return json_response(result)
+
+
+@app.post("/api/ft/calculate-all")
+async def calculate_all_ft():
+    return json_response(image_manager.calculate_all_ft_components())
+
+
+@app.get("/api/ft/component/{image_id}/{component}")
+async def get_component(image_id: int, component: str):
+    component = component.lower()
+    if component not in ["magnitude", "phase", "real", "imaginary"]:
+        raise HTTPException(status_code=400, detail="Invalid component")
+    result = image_manager.get_ft_component_display(image_id, component)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Component not available; calculate FT first")
+    return json_response(result)
+
+
+@app.post("/api/ft/mix")
+async def mix_components(body: MixRequest):
+    """Mix FT components from 4 images using per-image rectangular masks."""
+    try:
+        # Convert Pydantic models to dicts
+        rectangles_list = [
+            rect.dict() if rect is not None else None
+            for rect in body.rectangles
+        ]
+        
+        result = image_manager.mix_ft_components(
+            weights=body.weights,
+            rectangles=rectangles_list,
+            component_mode=body.component_mode,
+            preserve_energy=body.preserve_energy,
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        
+        return json_response(result)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ft/cache")
+async def ft_cache_info():
+    return json_response(image_manager.get_ft_cache_info())
+
+
+@app.delete("/api/ft/cache")
+async def ft_cache_clear(image_id: Optional[int] = None):
+    if image_id is not None and image_id not in [0, 1, 2, 3]:
+        raise HTTPException(status_code=400, detail="Image ID must be 0-3")
+    image_manager.clear_ft_cache(image_id)
+    return json_response({"success": True, "cleared": image_id if image_id is not None else "all"})
+

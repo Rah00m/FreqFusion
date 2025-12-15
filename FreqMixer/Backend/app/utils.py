@@ -13,20 +13,12 @@ import cv2
 # Re-export core image utilities
 # try:
 from .image_utils import (
-        calculate_ft_components,
         normalize_image,
         apply_brightness_contrast,
         numpy_to_base64,
         base64_to_numpy,
     )
-# except ImportError:
-#     from image_utils import (
-#         calculate_ft_components,
-#         normalize_image,
-#         apply_brightness_contrast,
-#         numpy_to_base64,
-#         base64_to_numpy,
-#     )
+
 
 
 class ImageUtils:
@@ -36,12 +28,6 @@ class ImageUtils:
     This class provides static wrappers around the image_utils module functions
     for backward compatibility. New code should use image_utils functions directly.
     """
-    
-    @staticmethod
-    def calculate_ft_components(image: np.ndarray) -> dict:
-        """Calculate Fourier Transform components"""
-        return calculate_ft_components(image)
-    
     @staticmethod
     def normalize_image(image: np.ndarray) -> np.ndarray:
         """Normalize image to 0-255 range"""
@@ -99,22 +85,22 @@ class ImageUtils:
         
         return resized_images
     
-    @staticmethod
-    def convert_to_grayscale(image: np.ndarray) -> np.ndarray:
-        """Convert image to grayscale"""
-        if image is None:
-            return None
+    # @staticmethod
+    # def convert_to_(image: np.ndarray) -> np.ndarray:
+    #     """Convert image to grayscale"""
+    #     if image is None:
+    #         return None
         
-        if len(image.shape) == 2:  # Already grayscale
-            return image
+    #     if len(image.shape) == 2:  # Already grayscale
+    #         return image
         
-        if len(image.shape) == 3:
-            if image.shape[2] == 3:  # RGB
-                return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            elif image.shape[2] == 4:  # RGBA
-                return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+    #     if len(image.shape) == 3:
+    #         if image.shape[2] == 3:  # RGB
+    #             return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    #         elif image.shape[2] == 4:  # RGBA
+    #             return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
         
-        return image
+    #     return image
     
     @staticmethod
     def create_sample_image(width: int, height: int, pattern_type: str = 'gradient') -> np.ndarray:
@@ -200,10 +186,17 @@ class ImageUtils:
 
 
 class JsonEncoder(json.JSONEncoder):
-    """Custom JSON encoder for numpy arrays and standard types."""
-    
     def default(self, obj):
         if isinstance(obj, np.ndarray):
+            # افحص dtype؛ إذا uint8 أو bytes، حوله لـ Base64
+            if obj.dtype == np.uint8:
+                from io import BytesIO
+                from PIL import Image
+                import base64
+                pil_img = Image.fromarray(obj)
+                buffered = BytesIO()
+                pil_img.save(buffered, format="PNG")
+                return base64.b64encode(buffered.getvalue()).decode("utf-8")
             return obj.tolist()
         if isinstance(obj, np.integer):
             return int(obj)

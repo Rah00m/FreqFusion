@@ -1,13 +1,13 @@
 """
 Stateless image utility functions.
 
-Provides helpers for array/base64 conversion, normalization, brightness/contrast,
-and Fourier Transform component calculation.
+Provides helpers for array/base64 conversion, normalization, and brightness/contrast.
+All Fourier Transform logic lives in ft_transformer.py.
 """
 
 import base64
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Optional
 
 import cv2
 import numpy as np
@@ -74,21 +74,9 @@ def apply_brightness_contrast(image: np.ndarray, brightness: int = 0, contrast: 
     return np.clip(image, 0, 255).astype(np.uint8)
 
 
-def calculate_ft_components(image: np.ndarray) -> Dict:
-    """Calculate Fourier Transform components for a grayscale image."""
-    if image is None:
-        return {}
-    dft = cv2.dft(np.float32(image), flags=cv2.DFT_COMPLEX_OUTPUT)
-    dft_shift = np.fft.fftshift(dft)
-    real = dft_shift[:, :, 0]
-    imaginary = dft_shift[:, :, 1]
-    magnitude = cv2.magnitude(real, imaginary)
-    phase = cv2.phase(real, imaginary)
-    magnitude_log = np.log1p(magnitude)
-    return {
-        "real": real,
-        "imaginary": imaginary,
-        "magnitude": magnitude_log,
-        "phase": phase,
-        "ft_shifted": dft_shift,
-    }
+__all__ = [
+    "numpy_to_base64",
+    "base64_to_numpy",
+    "normalize_image",
+    "apply_brightness_contrast",
+]

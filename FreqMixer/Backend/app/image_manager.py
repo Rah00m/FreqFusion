@@ -8,16 +8,10 @@ Provides a comprehensive API for image processing operations.
 import cv2
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
 
-# try:
-    # Try relative import (when used as package)
 from .image_data import ImageData
-from .image_utils import numpy_to_base64, apply_brightness_contrast, normalize_image, calculate_ft_components
-# except ImportError:
-    # # Fall back to direct import (when used as module)
-    # from image_data import ImageData
-    # from image_utils import numpy_to_base64, apply_brightness_contrast, normalize_image, calculate_ft_components
+from .image_utils import numpy_to_base64, apply_brightness_contrast, normalize_image
+from .ft_transformer import FourierTransformer, FTComponents
 
 
 class ImageManager:
@@ -42,6 +36,17 @@ class ImageManager:
         self.image_data: List[ImageData] = [ImageData(i) for i in range(self.MAX_IMAGES)]
         self.common_size: Optional[Tuple[int, int]] = None
         self._base64_cache: Dict[int, Optional[str]] = {i: None for i in range(self.MAX_IMAGES)}
+        self.ft_transformer = FourierTransformer(use_float32=True)
+
+    def _invalidate_ft_cache(self, image_id: Optional[int] = None) -> None:
+        """Clear cached FT components for a specific image or all images."""
+        if image_id is not None and self._validate_image_id(image_id):
+            self.image_data[image_id].ft_components = None
+            self.ft_transformer.clear_cache(f"img_{image_id}")
+        else:
+            for idx in range(self.MAX_IMAGES):
+                self.image_data[idx].ft_components = None
+            self.ft_transformer.clear_cache()
     
     # ==================== Public API Methods ====================
     
@@ -80,6 +85,9 @@ class ImageManager:
             self.image_data[image_id].current = gray_image.copy()
             self.image_data[image_id].loaded = True
             self.image_data[image_id].size = (gray_image.shape[1], gray_image.shape[0])
+
+            # Invalidate any prior FT cache for this slot
+            self._invalidate_ft_cache(image_id)
             
             # Update cache
             self._base64_cache[image_id] = numpy_to_base64(gray_image)
@@ -226,6 +234,7 @@ class ImageManager:
         if not self._validate_image_id(image_id) or image is None:
             return False
         
+        self._invalidate_ft_cache(image_id)
         self.image_data[image_id].current = image.copy()
         self.image_data[image_id].size = (image.shape[1], image.shape[0])
         self._base64_cache[image_id] = numpy_to_base64(image)
@@ -246,8 +255,46 @@ class ImageManager:
         
         self.image_data[image_id] = ImageData(image_id)
         self._base64_cache[image_id] = None
+        self._invalidate_ft_cache(image_id)
         self._update_common_size()
         
+    def convert_to_grayscale(self, image_id: int) -> Dict:
+        """
+        Convert the currently loaded image to grayscale and update caches.
+        
+        Args:
+            image_id: Image slot (0-3)
+        
+        Returns:
+            Status dict with success flag, updated size, and base64 data
+        """
+        if not self._validate_image_id(image_id):
+            return {'success': False, 'error': 'Invalid image ID'}
+
+        if not self.image_data[image_id].loaded:
+            return {'success': False, 'error': 'Image not loaded'}
+
+        try:
+            current_img = self.image_data[image_id].current
+            if current_img is None:
+                return {'success': False, 'error': 'No current image data'}
+
+            gray = self._convert_to_grayscale(current_img)
+            self.update_image(image_id, gray)
+
+            return {
+                'success': True,
+                'image_id': image_id,
+                'size': {
+                    'width': gray.shape[1],
+                    'height': gray.shape[0]
+                },
+                'base64': self._base64_cache[image_id],
+                'message': 'Converted to grayscale'
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
         return {
             'success': True,
             'deleted_id': image_id,
@@ -265,6 +312,7 @@ class ImageManager:
         self.image_data = [ImageData(i) for i in range(self.MAX_IMAGES)]
         self._base64_cache = {i: None for i in range(self.MAX_IMAGES)}
         self.common_size = None
+        self._invalidate_ft_cache()
         
         return {
             'success': True,
@@ -298,6 +346,7 @@ class ImageManager:
         width, height = self.common_size
         
         resized = cv2.resize(original, (width, height), interpolation=cv2.INTER_AREA)
+        self._invalidate_ft_cache(image_id)
         self.image_data[image_id].current = resized
         self.image_data[image_id].size = self.common_size
         self._base64_cache[image_id] = numpy_to_base64(resized)
@@ -356,60 +405,140 @@ class ImageManager:
         }
     
     # ==================== Fourier Transform Methods ====================
-    
-    def calculate_ft_components(self, image_id: int) -> Dict:
-        """
-        Calculate Fourier Transform components for an image.
-        
-        Args:
-            image_id: Image slot (0-3)
-            
-        Returns:
-            Dict containing real, imaginary, magnitude, and phase components
-        """
-        image = self.get_image_numpy(image_id)
-        if image is None:
-            return {}
-        
-        return self._calculate_ft_components(image)
-    
-    def store_ft_components(self, image_id: int, ft_data: Dict) -> None:
-        """
-        Store Fourier Transform components for an image.
-        
-        Args:
-            image_id: Image slot (0-3)
-            ft_data: Dict with magnitude, phase, real, imaginary
-        """
-        if self._validate_image_id(image_id) and ft_data:
-            img_data = self.image_data[image_id]
-            img_data.ft_magnitude = ft_data.get('magnitude')
-            img_data.ft_phase = ft_data.get('phase')
-            img_data.ft_real = ft_data.get('real')
-            img_data.ft_imaginary = ft_data.get('imaginary')
-    
-    def get_ft_components(self, image_id: int) -> Optional[Dict]:
-        """
-        Get stored Fourier Transform components.
-        
-        Args:
-            image_id: Image slot (0-3)
-            
-        Returns:
-            Dict of FT components or None
-        """
+
+    def calculate_ft_for_image(self, image_id: int) -> Dict:
+        """Calculate Fourier Transform components using FourierTransformer."""
+        if not self._validate_image_id(image_id):
+            return {'success': False, 'error': 'Invalid image ID'}
+        if not self.image_data[image_id].loaded:
+            return {'success': False, 'error': 'Image not loaded'}
+
+        try:
+            image = self.image_data[image_id].current
+            ft_components = self.ft_transformer.calculate_ft(image, image_id=f"img_{image_id}")
+
+            # Store new style
+            self.image_data[image_id].ft_components = ft_components
+
+            return {
+                'success': True,
+                'image_id': image_id,
+                'components_info': ft_components.to_dict(),
+            }
+        except Exception as exc:  # pragma: no cover - defensive
+            return {'success': False, 'error': str(exc)}
+
+    def calculate_all_ft_components(self) -> Dict:
+        """Calculate FT for all loaded images."""
+        results = {}
+        for idx in range(self.MAX_IMAGES):
+            if self.image_data[idx].loaded:
+                results[f'image_{idx}'] = self.calculate_ft_for_image(idx)
+        return {'success': True, 'results': results, 'count': len(results)}
+
+    def get_ft_component_display(self, image_id: int, component_name: str) -> Optional[Dict]:
+        """Get a display-ready FT component (base64 + metadata)."""
         if not self._validate_image_id(image_id):
             return None
-        
         img_data = self.image_data[image_id]
-        if img_data.ft_magnitude is not None:
+        if not img_data.has_ft_components():
+            return None
+        try:
+            component_array = img_data.get_ft_display(component_name)
+            if component_array is None:
+                return None
+            base64_str = numpy_to_base64(component_array)
             return {
-                'magnitude': img_data.ft_magnitude,
-                'phase': img_data.ft_phase,
-                'real': img_data.ft_real,
-                'imaginary': img_data.ft_imaginary
+                'image_id': image_id,
+                'component': component_name,
+                'base64': base64_str,
+                'shape': component_array.shape,
+                'dtype': str(component_array.dtype),
             }
-        return None
+        except Exception:
+            return None
+
+    def mix_ft_components(
+        self,
+        weights: List[float],
+        rectangles: List[Optional[Dict]],
+        component_mode: str = 'magnitude_phase',
+        preserve_energy: bool = False,
+    ) -> Dict:
+        """Mix FT components with per-image rectangular masks.
+        
+        Args:
+            weights: Weight per image (4 values)
+            rectangles: List of 4 rectangle dicts {x, y, width, height, type}
+                       Use None for full region (no mask)
+            component_mode: 'magnitude_phase' or 'real_imaginary'
+            preserve_energy: If True, preserve spectral energy
+        
+        Returns:
+            Dict with success flag, base64 image, stats, and metadata
+        """
+        try:
+            # Validate inputs
+            if len(weights) != self.MAX_IMAGES:
+                return {'success': False, 'error': f'Weights must have {self.MAX_IMAGES} values'}
+            
+            if len(rectangles) != self.MAX_IMAGES:
+                return {'success': False, 'error': f'Rectangles must have {self.MAX_IMAGES} values'}
+            
+            # Collect FT components from all images
+            components_list: List[FTComponents] = []
+            for idx in range(self.MAX_IMAGES):
+                if not self.image_data[idx].has_ft_components():
+                    return {'success': False, 'error': f'Image {idx} missing FT components'}
+                components_list.append(self.image_data[idx].ft_components)
+            
+            # Call FourierTransformer mix_components (no mask creation here)
+            mixed = self.ft_transformer.mix_components(
+                components_list=components_list,
+                weights=weights,
+                rectangles=rectangles,
+                component_mode=component_mode,
+                preserve_energy=preserve_energy,
+            )
+            
+            display_image = mixed['display']
+            raw_image = mixed['raw']
+            
+            return {
+                'success': True,
+                'base64': numpy_to_base64(display_image),
+                'shape': {
+                    'height': int(display_image.shape[0]),
+                    'width': int(display_image.shape[1]),
+                },
+                'weights': weights,
+                'mode': component_mode,
+                'preserve_energy': preserve_energy,
+                'rectangles': rectangles,
+                'raw_stats': {
+                    'min': float(np.min(raw_image)),
+                    'max': float(np.max(raw_image)),
+                    'mean': float(np.mean(raw_image)),
+                    'std': float(np.std(raw_image)),
+                },
+            }
+        
+        except ValueError as e:
+            return {'success': False, 'error': str(e)}
+        except Exception as e:
+            return {'success': False, 'error': f'Mixing failed: {str(e)}'}
+
+    def get_ft_cache_info(self) -> Dict:
+        return self.ft_transformer.get_cache_info()
+
+    def clear_ft_cache(self, image_id: Optional[int] = None) -> None:
+        if image_id is not None:
+            self.ft_transformer.clear_cache(f"img_{image_id}")
+        else:
+            self.ft_transformer.clear_cache()
+
+    # ============== Legacy FT wrappers (backward compatibility) ==============
+    # Legacy FT wrappers removed; FTComponents is the single source of truth
     
     # ==================== Image Processing Methods ====================
     
@@ -446,7 +575,7 @@ class ImageManager:
         if image is None:
             return None
         
-        adjusted = self._apply_brightness_contrast(image.copy(), brightness, contrast)
+        adjusted = apply_brightness_contrast(image.copy(), brightness, contrast)
         self.update_image(image_id, adjusted)
         
         return {'success': True, 'image_id': image_id}
