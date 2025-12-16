@@ -3,6 +3,7 @@ import "./App.css";
 import ImageViewer from "./components/ImageViewer";
 import ControlPanel from "./components/ControlPanel";
 import MixerControls from "./components/MixerControls";
+
 import API from "./services/api";
 
 function App() {
@@ -439,23 +440,46 @@ function App() {
 
         {/* Right Panel */}
         <div className="right-panel">
-          <div className="mixer-panel">
+          <div className="outputs-panel">
             <h2>
-              <i className="fas fa-blender"></i> Mixer
+              <i className="fas fa-desktop"></i> Output
             </h2>
+            <div style={{ marginBottom: "12px", fontSize: "12px" }}>
+              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+                Mode:
+              </label>
+              <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <label style={{ fontSize: "12px" }}>
+                  <input
+                    type="radio"
+                    name="componentMode"
+                    value="magnitude_phase"
+                    checked={componentMode === "magnitude_phase"}
+                    onChange={(e) => setComponentMode(e.target.value)}
+                    style={{ marginRight: "2px" }}
+                  />
+                  Mag/Phase
+                </label>
+                <label style={{ fontSize: "12px" }}>
+                  <input
+                    type="radio"
+                    name="componentMode"
+                    value="real_imaginary"
+                    checked={componentMode === "real_imaginary"}
+                    onChange={(e) => setComponentMode(e.target.value)}
+                    style={{ marginRight: "2px" }}
+                  />
+                  Real/Imag
+                </label>
+              </div>
+            </div>
             <MixerControls
               processing={processing}
               progress={progress}
               onStartMixing={handleStartMixing}
               onCancel={handleCancel}
             />
-          </div>
-
-          <div className="outputs-panel">
-            <h2>
-              <i className="fas fa-desktop"></i> Output
-            </h2>
-            <div className="outputs-grid">
+            <div className="outputs-grid" style={{ marginTop: "12px" }}>
               {outputs.map((output) => (
                 <div key={output.id} className="output-container">
                   <div className="output-header">
