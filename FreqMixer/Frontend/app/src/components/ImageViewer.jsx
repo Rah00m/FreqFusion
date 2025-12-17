@@ -24,6 +24,9 @@ const ImageViewer = ({
   const drawingRef = useRef(false);
   const startRef = useRef(null);
   const draftRef = useRef(null);
+  const modeRef = useRef("idle"); // idle | drawing | moving | resizing
+  const activeHandleRef = useRef(null); // 'nw','n','ne','e','se','s','sw','w'
+  const initialRectRef = useRef(null);
   const [, forceRender] = React.useReducer((x) => x + 1, 0);
 
   const handleDoubleClick = () => {
@@ -103,37 +106,98 @@ const ImageViewer = ({
 
   const handleMouseDown = (e) => {
     if (!enableMask || !hasImage) return;
+    // If clicking empty area -> start drawing
     const pos = getPosInNatural(e);
     if (!pos) return;
     drawingRef.current = true;
+    modeRef.current = "drawing";
     startRef.current = pos;
     draftRef.current = { x: pos.x, y: pos.y, width: 0, height: 0 };
     forceRender();
   };
 
   const handleMouseMove = (e) => {
-    if (!enableMask || !drawingRef.current) return;
+    if (!enableMask) return;
     const pos = getPosInNatural(e);
-    if (!pos || !startRef.current) return;
-    draftRef.current = normalizeRect(startRef.current, pos);
-    forceRender();
-  };
-
-  const handleMouseUp = (e) => {
-    if (!enableMask || !drawingRef.current) return;
-    const pos = getPosInNatural(e);
-    drawingRef.current = false;
-    if (!pos || !startRef.current) {
-      draftRef.current = null;
+    if (!pos) return;
+    if (modeRef.current === "drawing" && drawingRef.current) {
+      if (!startRef.current) return;
+      draftRef.current = normalizeRect(startRef.current, pos);
       forceRender();
       return;
     }
-    const rect = normalizeRect(startRef.current, pos);
+    if (
+      modeRef.current === "moving" &&
+      draftRef.current &&
+      initialRectRef.current
+    ) {
+      const dx = pos.x - startRef.current.x;
+      const dy = pos.y - startRef.current.y;
+      const natW = pos.natW;
+      const natH = pos.natH;
+      const newX = Math.min(
+        Math.max(initialRectRef.current.x + dx, 0),
+        natW - initialRectRef.current.width
+      );
+      const newY = Math.min(
+        Math.max(initialRectRef.current.y + dy, 0),
+        natH - initialRectRef.current.height
+      );
+      draftRef.current = {
+        ...initialRectRef.current,
+        x: Math.round(newX),
+        y: Math.round(newY),
+      };
+      forceRender();
+      return;
+    }
+    if (
+      modeRef.current === "resizing" &&
+      draftRef.current &&
+      initialRectRef.current
+    ) {
+      const start = startRef.current;
+      const natW = pos.natW;
+      const natH = pos.natH;
+      const anchor = activeHandleRef.current;
+      // Compute new rect based on handle
+      let x1 = initialRectRef.current.x;
+      let y1 = initialRectRef.current.y;
+      let x2 = initialRectRef.current.x + initialRectRef.current.width;
+      let y2 = initialRectRef.current.y + initialRectRef.current.height;
+      // Determine which edges move
+      if (anchor.includes("w")) x1 = Math.min(Math.max(pos.x, 0), x2 - 1);
+      if (anchor.includes("e")) x2 = Math.max(Math.min(pos.x, natW), x1 + 1);
+      if (anchor.includes("n")) y1 = Math.min(Math.max(pos.y, 0), y2 - 1);
+      if (anchor.includes("s")) y2 = Math.max(Math.min(pos.y, natH), y1 + 1);
+      const newRect = normalizeRect({ x: x1, y: y1 }, { x: x2, y: y2 });
+      draftRef.current = newRect;
+      forceRender();
+      return;
+    }
+  };
+
+  const handleMouseUp = (e) => {
+    if (!enableMask) return;
+    const pos = getPosInNatural(e);
+    drawingRef.current = false;
+    const mode = modeRef.current;
+    modeRef.current = "idle";
+    activeHandleRef.current = null;
+    if (!pos || !startRef.current || !draftRef.current) {
+      draftRef.current = null;
+      startRef.current = null;
+      initialRectRef.current = null;
+      forceRender();
+      return;
+    }
+    const finalRect = draftRef.current;
     draftRef.current = null;
     startRef.current = null;
+    initialRectRef.current = null;
     forceRender();
-    if (onMaskDraw && rect.width > 2 && rect.height > 2) {
-      onMaskDraw(rect);
+    if (onMaskDraw && finalRect.width > 2 && finalRect.height > 2) {
+      onMaskDraw(finalRect);
     }
   };
 
@@ -147,6 +211,31 @@ const ImageViewer = ({
 
   const activeRect = draftRef.current || mask;
   const displayRect = toDisplayRect(activeRect);
+
+  const beginMove = (e) => {
+    e.stopPropagation();
+    const pos = getPosInNatural(e);
+    if (!pos || !activeRect) return;
+    modeRef.current = "moving";
+    drawingRef.current = true;
+    startRef.current = pos;
+    initialRectRef.current = { ...activeRect };
+    draftRef.current = { ...activeRect };
+    forceRender();
+  };
+
+  const beginResize = (handle, e) => {
+    e.stopPropagation();
+    const pos = getPosInNatural(e);
+    if (!pos || !activeRect) return;
+    modeRef.current = "resizing";
+    activeHandleRef.current = handle;
+    drawingRef.current = true;
+    startRef.current = pos;
+    initialRectRef.current = { ...activeRect };
+    draftRef.current = { ...activeRect };
+    forceRender();
+  };
 
   return (
     <div
@@ -182,8 +271,45 @@ const ImageViewer = ({
                   width: `${displayRect.width}px`,
                   height: `${displayRect.height}px`,
                 }}
+                onMouseDown={beginMove}
               >
-                <span className="mask-label">{mask?.type || "inner"}</span>
+                <span className="mask-label">
+                  {(mask?.type || "inner").toUpperCase()} ·{" "}
+                  {Math.round(activeRect.width)}×{Math.round(activeRect.height)}
+                </span>
+                {/* Resize handles */}
+                <div
+                  className="mask-handle nw"
+                  onMouseDown={(e) => beginResize("nw", e)}
+                />
+                <div
+                  className="mask-handle n"
+                  onMouseDown={(e) => beginResize("n", e)}
+                />
+                <div
+                  className="mask-handle ne"
+                  onMouseDown={(e) => beginResize("ne", e)}
+                />
+                <div
+                  className="mask-handle e"
+                  onMouseDown={(e) => beginResize("e", e)}
+                />
+                <div
+                  className="mask-handle se"
+                  onMouseDown={(e) => beginResize("se", e)}
+                />
+                <div
+                  className="mask-handle s"
+                  onMouseDown={(e) => beginResize("s", e)}
+                />
+                <div
+                  className="mask-handle sw"
+                  onMouseDown={(e) => beginResize("sw", e)}
+                />
+                <div
+                  className="mask-handle w"
+                  onMouseDown={(e) => beginResize("w", e)}
+                />
                 {onMaskClear && (
                   <button
                     className="clear-mask"

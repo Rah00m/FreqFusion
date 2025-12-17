@@ -7,6 +7,7 @@ import json
 import os
 from typing import Dict, List, Optional
 import uuid 
+from typing import Literal
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -68,12 +69,47 @@ class RectangleRegion(BaseModel):
     type: str = Field("inner", pattern="^(inner|outer)$", description="inner or outer")
 
 
-class MixRequest(BaseModel):
-    weights: List[float] = Field(..., min_items=4, max_items=4, description="Weight per image")
-    rectangles: List[Optional[RectangleRegion]] = Field(..., min_items=4, max_items=4, description="Rectangle per image (null = full region)")
-    component_mode: str = Field("magnitude_phase", pattern="^(magnitude_phase|real_imaginary)$")
-    preserve_energy: bool = False
+class WeightPair(BaseModel):
+    """A pair of weights for a single image's two components."""
+    weights: List[float] = Field(..., min_length=2, max_length=2)
+    
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+    
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, list):
+            if len(v) != 2:
+                raise ValueError(f"Weight pair must have exactly 2 values, got {len(v)}")
+            return [float(w) for w in v]
+        return v
 
+
+class MixRequest(BaseModel):
+    """Request model for mixing FT components.
+    
+    weights: List of 4 lists, each with 2 floats:
+        - For magnitude_phase mode: [magnitude_weight, phase_weight]
+        - For real_imaginary mode: [real_weight, imaginary_weight]
+    """
+    weights: List[List[float]] = Field(
+        ..., 
+        min_length=4, 
+        max_length=4, 
+        description="4 images, each with [component1_weight, component2_weight]"
+    )
+    rectangles: List[Optional[RectangleRegion]] = Field(
+        ..., 
+        min_length=4, 
+        max_length=4, 
+        description="Rectangle per image (null = full region)"
+    )
+    component_mode: str = Field(
+        "magnitude_phase", 
+        pattern="^(magnitude_phase|real_imaginary)$"
+    )
+    preserve_energy: bool = False
 
 @app.get("/")
 async def root():
@@ -247,11 +283,50 @@ async def get_component(image_id: int, component: str):
     return json_response(result)
 
 
+# @app.post("/api/ft/mix")
+# async def mix_components(body: MixRequest):
+#     """Mix FT components from 4 images using per-image rectangular masks."""
+#     try:
+#         # Convert Pydantic models to dicts
+#         rectangles_list = [
+#             rect.dict() if rect is not None else None
+#             for rect in body.rectangles
+#         ]
+        
+#         result = image_manager.mix_ft_components(
+#             weights=body.weights,
+#             rectangles=rectangles_list,
+#             component_mode=body.component_mode,
+#             preserve_energy=body.preserve_energy,
+#         )
+        
+#         if not result.get("success"):
+#             raise HTTPException(status_code=400, detail=result.get("error"))
+        
+#         return json_response(result)
+    
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/ft/mix")
 async def mix_components(body: MixRequest):
-    """Mix FT components from 4 images using per-image rectangular masks."""
+    """Mix FT components from 4 images using per-image rectangular masks.
+    
+    weights format:
+    - For magnitude_phase: [[mag0, phase0], [mag1, phase1], [mag2, phase2], [mag3, phase3]]
+    - For real_imaginary: [[real0, imag0], [real1, imag1], [real2, imag2], [real3, imag3]]
+    """
     try:
-        # Convert Pydantic models to dicts
+        # Validate each weight pair has exactly 2 values
+        for idx, weight_pair in enumerate(body.weights):
+            if len(weight_pair) != 2:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Weight for image {idx} must have exactly 2 values, got {len(weight_pair)}"
+                )
+        
         rectangles_list = [
             rect.dict() if rect is not None else None
             for rect in body.rectangles
@@ -273,6 +348,8 @@ async def mix_components(body: MixRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @app.get("/api/ft/cache")

@@ -460,7 +460,7 @@ class ImageManager:
 
     def mix_ft_components(
         self,
-        weights: List[float],
+        weights: List[List[float]],
         rectangles: List[Optional[Dict]],
         component_mode: str = 'magnitude_phase',
         preserve_energy: bool = False,
@@ -468,7 +468,9 @@ class ImageManager:
         """Mix FT components with per-image rectangular masks.
         
         Args:
-            weights: Weight per image (4 values)
+            weights: List of 4 weight pairs, each [component1_weight, component2_weight]
+                    For magnitude_phase: [mag_weight, phase_weight]
+                    For real_imaginary: [real_weight, imag_weight]
             rectangles: List of 4 rectangle dicts {x, y, width, height, type}
                        Use None for full region (no mask)
             component_mode: 'magnitude_phase' or 'real_imaginary'
@@ -482,6 +484,11 @@ class ImageManager:
             if len(weights) != self.MAX_IMAGES:
                 return {'success': False, 'error': f'Weights must have {self.MAX_IMAGES} values'}
             
+            # Validate each weight is a list of 2 floats
+            for idx, weight_pair in enumerate(weights):
+                if not isinstance(weight_pair, list) or len(weight_pair) != 2:
+                    return {'success': False, 'error': f'Weight for image {idx} must be a list of 2 values'}
+            
             if len(rectangles) != self.MAX_IMAGES:
                 return {'success': False, 'error': f'Rectangles must have {self.MAX_IMAGES} values'}
             
@@ -494,12 +501,13 @@ class ImageManager:
             
             # Call FourierTransformer mix_components (no mask creation here)
             mixed = self.ft_transformer.mix_components(
-                components_list=components_list,
-                weights=weights,
-                rectangles=rectangles,
-                component_mode=component_mode,
-                preserve_energy=preserve_energy,
+                components_list,
+                weights,
+                rectangles,
+                component_mode,
+                preserve_energy,
             )
+
             
             display_image = mixed['display']
             raw_image = mixed['raw']

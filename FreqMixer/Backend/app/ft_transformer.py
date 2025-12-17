@@ -21,21 +21,30 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FTComponents:
-    """Container for Fourier Transform components."""
-    ft_shifted: np.ndarray
+    """Container for Fourier Transform components.
+    
+    CRITICAL: Dual storage for mathematical correctness:
+    - ft_original: unshifted DFT (for mixing operations)
+    - ft_shifted: shifted DFT (for visualization ONLY)
+    - *_raw: from ft_original (for mathematical operations)
+    - *_display: from ft_shifted (for visualization)
+    """
+    ft_original: np.ndarray  # Unshifted - for operations
+    ft_shifted: np.ndarray   # Shifted - for display only
     magnitude_display: np.ndarray
     phase_display: np.ndarray
     real_display: np.ndarray
     imaginary_display: np.ndarray
-    magnitude_raw: np.ndarray
-    phase_raw: np.ndarray
-    real_raw: np.ndarray
-    imaginary_raw: np.ndarray
+    magnitude_raw: np.ndarray  # From ft_original
+    phase_raw: np.ndarray      # From ft_original
+    real_raw: np.ndarray       # From ft_original
+    imaginary_raw: np.ndarray  # From ft_original
 
     def to_dict(self) -> Dict:
         return {
-            "ft_shape": self.ft_shifted.shape,
-            "dtype": str(self.ft_shifted.dtype),
+            "ft_original_shape": self.ft_original.shape,
+            "ft_shifted_shape": self.ft_shifted.shape,
+            "dtype": str(self.ft_original.dtype),
             "magnitude_shape": self.magnitude_display.shape,
             "phase_shape": self.phase_display.shape,
             "real_shape": self.real_display.shape,
@@ -90,7 +99,7 @@ class FourierTransformer:
         ft_original = np.fft.fft2(image_gray)
         ft_shifted = np.fft.fftshift(ft_original)
 
-        comps = self._extract_components(ft_shifted)
+        comps = self._extract_components(ft_original, ft_shifted)
 
         if image_id:
             self.cache[image_id] = comps
@@ -107,18 +116,32 @@ class FourierTransformer:
                 return image.squeeze()
         return image
 
-    def _extract_components(self, ft_shifted: np.ndarray) -> FTComponents:
-        magnitude_raw = np.abs(ft_shifted)
-        phase_raw = np.angle(ft_shifted)
-        real_raw = ft_shifted.real
-        imaginary_raw = ft_shifted.imag
+    def _extract_components(self, ft_original: np.ndarray, ft_shifted: np.ndarray) -> FTComponents:
+        """Extract components from BOTH ft_original (for ops) and ft_shifted (for display).
+        
+        CRITICAL SEPARATION:
+        - Raw components from ft_original → used for mixing operations
+        - Display components from ft_shifted → used for visualization only
+        """
+        # RAW components from ft_original (for mathematical operations)
+        magnitude_raw = np.abs(ft_original)
+        phase_raw = np.angle(ft_original)
+        real_raw = ft_original.real
+        imaginary_raw = ft_original.imag
 
-        magnitude_display = self._normalize_magnitude(magnitude_raw)
-        phase_display = self._normalize_phase(phase_raw)
-        real_display = self._normalize_real_imag(real_raw)
-        imag_display = self._normalize_real_imag(imaginary_raw)
+        # DISPLAY components from ft_shifted (for visualization)
+        magnitude_shifted = np.abs(ft_shifted)
+        phase_shifted = np.angle(ft_shifted)
+        real_shifted = ft_shifted.real
+        imag_shifted = ft_shifted.imag
+        
+        magnitude_display = self._normalize_magnitude(magnitude_shifted)
+        phase_display = self._normalize_phase(phase_shifted)
+        real_display = self._normalize_real_imag(real_shifted)
+        imag_display = self._normalize_real_imag(imag_shifted)
 
         return FTComponents(
+            ft_original=ft_original,
             ft_shifted=ft_shifted,
             magnitude_display=magnitude_display,
             phase_display=phase_display,
@@ -209,83 +232,65 @@ class FourierTransformer:
     def mix_components(
         self,
         components_list: List[FTComponents],
-        weights: List[float],
+        weights: List[List[float]],  # [[w1a, w1b], ...]
         rectangles: List[Optional[Dict]],
-        component_mode: str = 'magnitude_phase',
+        component_mode: str = "magnitude_phase",
         preserve_energy: bool = False,
     ) -> Dict:
-        """Mix FT components with per-image rectangular masks.
+        """Mix FT components using ft_original (not ft_shifted) for mathematical correctness.
         
-        Args:
-            components_list: List of FTComponents (one per image)
-            weights: Weight for each image (will be normalized)
-            rectangles: List of rectangle dicts {x, y, width, height, type} per image
-                       Use None for full region (no mask)
-            component_mode: 'magnitude_phase' or 'real_imaginary'
-            preserve_energy: If True, preserve spectral energy
-            
-        Returns:
-            Dict with 'display' and 'raw' numpy arrays
+        CRITICAL: All operations use ft_original to preserve Hermitian symmetry.
         """
-        # Validate inputs
         if len(components_list) != len(weights):
             raise ValueError(f"Components count {len(components_list)} != weights count {len(weights)}")
-        
         if len(rectangles) != len(weights):
             raise ValueError(f"Rectangles count {len(rectangles)} != weights count {len(weights)}")
-        
-        if component_mode not in ('magnitude_phase', 'real_imaginary'):
+        if component_mode not in ("magnitude_phase", "real_imaginary"):
             raise ValueError(f"Invalid component_mode: {component_mode}")
-        
-        # Check all FT components have same shape
-        shapes = {comp.ft_shifted.shape for comp in components_list}
+
+        # Use ft_original shape (unshifted) for operations
+        shapes = {comp.ft_original.shape for comp in components_list}
         if len(shapes) != 1:
             raise ValueError("FT component shapes differ across images")
-        
-        target_shape = components_list[0].ft_shifted.shape
-        
-        # Normalize weights
-        weight_sum = sum(weights)
-        if weight_sum == 0:
-            raise ValueError("Weights sum to zero")
-        normalized_weights = [w / weight_sum for w in weights]
-        
-        # Initialize mixed FT array
+        target_shape = components_list[0].ft_original.shape
+
+        def as_float_pair(pair: List[float]) -> Tuple[float, float]:
+            if len(pair) != 2:
+                raise ValueError("Each weight entry must have exactly 2 values")
+            a = float(pair[0]) if np.isfinite(pair[0]) else 0.0
+            b = float(pair[1]) if np.isfinite(pair[1]) else 0.0
+            return a, b
+
         mixed_ft = np.zeros(target_shape, dtype=np.complex128)
-        
-        # Process each image with its rectangle
-        for idx, (comp, weight, rect) in enumerate(zip(components_list, normalized_weights, rectangles)):
-            # Extract frequency components based on mode
-            if component_mode == 'magnitude_phase':
-                magnitude = comp.magnitude_raw
-                phase = comp.phase_raw
+
+        for comp, pair, rect in zip(components_list, weights, rectangles):
+            w1, w2 = as_float_pair(pair)
+
+            if component_mode == "magnitude_phase":
+                magnitude = comp.magnitude_raw * w1
+                phase = comp.phase_raw * w2  # ضرب خطي بدلاً من أسّ
                 ft_component = magnitude * np.exp(1j * phase)
             else:  # real_imaginary
-                ft_component = comp.real_raw + 1j * comp.imaginary_raw
-            
-            # Create and apply per-image mask if rectangle provided
+                ft_component = comp.real_raw * w1 + 1j * comp.imaginary_raw * w2
+
             if rect is not None:
                 mask = self.create_rect_region_mask(
                     target_shape,
-                    int(rect.get('x', 0)),
-                    int(rect.get('y', 0)),
-                    int(rect.get('width', 0)),
-                    int(rect.get('height', 0)),
-                    rect.get('type', 'inner'),
+                    int(rect.get("x", 0)),
+                    int(rect.get("y", 0)),
+                    int(rect.get("width", 0)),
+                    int(rect.get("height", 0)),
+                    rect.get("type", "inner"),
                 )
                 ft_component = ft_component * mask.astype(np.complex128)
-            
-            # Accumulate weighted contribution
-            mixed_ft += weight * ft_component
-        
-        # Perform inverse FFT
-        raw_image, display_image = self.inverse_ft(mixed_ft, preserve_energy)
-        
-        return {
-            'display': display_image,
-            'raw': raw_image,
-        }
 
+            mixed_ft += ft_component
+
+        raw_image, display_image = self.inverse_ft(mixed_ft, preserve_energy)
+        raw_image = np.nan_to_num(raw_image, nan=0.0, posinf=255.0, neginf=0.0)
+        display_image = np.nan_to_num(display_image, nan=0.0, posinf=255.0, neginf=0.0)
+
+        return {"display": display_image, "raw": raw_image}
 
     def inverse_ft(self, ft_shifted: np.ndarray, preserve_energy: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """Inverse FFT with optional energy preservation.
@@ -315,7 +320,8 @@ class FourierTransformer:
 
     def get_cache_info(self) -> Dict:
         total_memory = sum(
-            comp.ft_shifted.nbytes
+            comp.ft_original.nbytes
+            + comp.ft_shifted.nbytes
             + comp.magnitude_display.nbytes
             + comp.phase_display.nbytes
             + comp.real_display.nbytes

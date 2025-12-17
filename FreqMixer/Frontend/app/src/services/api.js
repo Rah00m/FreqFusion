@@ -66,7 +66,32 @@ const API = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return handleResponse(res);
+    if (!res.ok) {
+      let message = "Mix request failed";
+      try {
+        const data = await res.json();
+        console.error(
+          "Backend validation error details:",
+          JSON.stringify(data, null, 2)
+        );
+        if (data?.detail && Array.isArray(data.detail)) {
+          console.error(
+            "Validation errors:",
+            data.detail
+              .map(
+                (e) =>
+                  `${e.loc?.join(".")} - ${e.msg} (input: ${JSON.stringify(
+                    e.input
+                  )})`
+              )
+              .join("\n")
+          );
+        }
+        message = data?.detail || data?.message || JSON.stringify(data);
+      } catch (_) {}
+      throw new Error(message);
+    }
+    return res.json();
   },
 
   getFTCache: async () => {

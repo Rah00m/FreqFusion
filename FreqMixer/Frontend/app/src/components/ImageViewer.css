@@ -68,8 +68,71 @@
   position: absolute;
   border: 2px dashed #4fd1c5;
   background: rgba(79, 209, 197, 0.12);
-  pointer-events: none;
+  pointer-events: auto;
   box-sizing: border-box;
+}
+.mask-handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  background: #4fd1c5;
+  border: 2px solid #111;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+/* Corner handles */
+.mask-handle.nw {
+  left: -7px;
+  top: -7px;
+  cursor: nwse-resize;
+}
+.mask-handle.ne {
+  right: -7px;
+  top: -7px;
+  cursor: nesw-resize;
+}
+.mask-handle.sw {
+  left: -7px;
+  bottom: -7px;
+  cursor: nesw-resize;
+}
+.mask-handle.se {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
+}
+
+/* Edge handles */
+.mask-handle.n {
+  left: 50%;
+  transform: translateX(-50%);
+  top: -7px;
+  cursor: ns-resize;
+}
+.mask-handle.s {
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: -7px;
+  cursor: ns-resize;
+}
+.mask-handle.w {
+  top: 50%;
+  transform: translateY(-50%);
+  left: -7px;
+  cursor: ew-resize;
+}
+.mask-handle.e {
+  top: 50%;
+  transform: translateY(-50%);
+  right: -7px;
+  cursor: ew-resize;
+}
+
+.mask-rect:hover {
+  border-color: #66efe0;
+  background: rgba(79, 209, 197, 0.18);
 }
 
 .mask-rect .mask-label {

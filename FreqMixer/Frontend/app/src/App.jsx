@@ -21,7 +21,12 @@ function App() {
         image: null,
         size: null,
         ftMode: "magnitude",
-        magWeight: 0.25,
+        weights: {
+          magnitude: 0.25,
+          phase: 0.25,
+          real: 0.25,
+          imaginary: 0.25,
+        },
         mask: null,
         maskType: "inner",
       }))
@@ -40,6 +45,7 @@ function App() {
       .fill()
       .map(() => ({}))
   );
+  const [showWeights, setShowWeights] = useState(Array(4).fill(false));
 
   // Effects
   const fetchAllImages = async () => {
@@ -54,7 +60,12 @@ function App() {
             image: toDataUrl(imgs[i]?.base64),
             size: imgs[i]?.size || null,
             ftMode: "magnitude",
-            magWeight: imgs[i]?.weight ?? 0.25,
+            weights: {
+              magnitude: imgs[i]?.weights?.magnitude ?? 0.25,
+              phase: imgs[i]?.weights?.phase ?? 0.25,
+              real: imgs[i]?.weights?.real ?? 0.25,
+              imaginary: imgs[i]?.weights?.imaginary ?? 0.25,
+            },
             mask: imgs[i]?.rectangle || null,
             maskType: imgs[i]?.rectangle?.type || "inner",
           }))
@@ -150,10 +161,20 @@ function App() {
     fetchFTComponent(id, newMode);
   };
 
-  const handleWeightChange = (id, value) => {
+  const handleWeightChange = (id, component, value) => {
     const val = parseFloat(value);
     setImages((prev) =>
-      prev.map((img, idx) => (idx === id ? { ...img, magWeight: val } : img))
+      prev.map((img, idx) =>
+        idx === id
+          ? {
+              ...img,
+              weights: {
+                ...img.weights,
+                [component]: Number.isFinite(val) ? val : 0,
+              },
+            }
+          : img
+      )
     );
   };
 
@@ -280,21 +301,58 @@ function App() {
         };
       };
 
-      const payload = {
-        weights: images.map((img) =>
-          Number.isFinite(img.magWeight) ? img.magWeight : 0
-        ),
-        rectangles: images.map((img) =>
-          img.mask
-            ? clampRect(
-                { ...img.mask, type: img.mask.type || img.maskType || "inner" },
-                img.size || commonSize
-              )
-            : null
-        ),
-        component_mode: componentMode,
-        preserve_energy: preserveEnergy,
+      const prepareMixPayload = (
+        images,
+        rectanglesList,
+        componentMode,
+        preserveEnergy = false
+      ) => {
+        const weightPairs = images.map((img, idx) => {
+          if (componentMode === "magnitude_phase") {
+            const mag = Number(img.weights?.magnitude ?? 0);
+            const phase = Number(img.weights?.phase ?? 0);
+            if (!Number.isFinite(mag) || !Number.isFinite(phase)) {
+              throw new Error(`Image ${idx + 1} has invalid magnitude/phase`);
+            }
+            return [mag, phase];
+          }
+          const real = Number(img.weights?.real ?? 0);
+          const imag = Number(img.weights?.imaginary ?? 0);
+          if (!Number.isFinite(real) || !Number.isFinite(imag)) {
+            throw new Error(`Image ${idx + 1} has invalid real/imaginary`);
+          }
+          return [real, imag];
+        });
+
+        if (weightPairs.length !== images.length) {
+          throw new Error("Mismatch between weights and images count");
+        }
+
+        return {
+          weights: weightPairs,
+          rectangles: rectanglesList,
+          component_mode: componentMode,
+          preserve_energy: preserveEnergy,
+        };
       };
+
+      const rectanglesList = images.map((img) =>
+        img.mask
+          ? clampRect(
+              { ...img.mask, type: img.mask.type || img.maskType || "inner" },
+              img.size || commonSize
+            )
+          : null
+      );
+
+      const payload = prepareMixPayload(
+        images,
+        rectanglesList,
+        componentMode,
+        preserveEnergy
+      );
+
+      console.log("Sending mix payload:", JSON.stringify(payload, null, 2));
 
       const res = await API.mixFT(payload);
       const img = toDataUrl(res?.base64);
@@ -359,24 +417,61 @@ function App() {
                 />
 
                 {img.image && (
-                  <div className="weight-controls">
-                    <div className="slider-group">
-                      <div className="slider-label">
-                        <span>W</span>
-                        <span>{(img.magWeight * 100).toFixed(0)}%</span>
+                  <>
+                    <button
+                      className="toggle-weights-btn"
+                      onClick={() => {
+                        setShowWeights((prev) =>
+                          prev.map((val, idx) => (idx === img.id ? !val : val))
+                        );
+                      }}
+                    >
+                      <i
+                        className={`fas fa-chevron-${
+                          showWeights[img.id] ? "up" : "down"
+                        }`}
+                      ></i>
+                      Weights
+                    </button>
+                    {showWeights[img.id] && (
+                      <div className="weight-controls">
+                        {["magnitude", "phase", "real", "imaginary"].map(
+                          (comp) => (
+                            <div
+                              className="slider-group"
+                              key={`${img.id}-${comp}`}
+                            >
+                              <div className="slider-label">
+                                <span style={{ textTransform: "capitalize" }}>
+                                  {comp}
+                                </span>
+                                <span>
+                                  {((img.weights?.[comp] ?? 0) * 100).toFixed(
+                                    0
+                                  )}
+                                  %
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.01"
+                                value={img.weights?.[comp] ?? 0}
+                                onChange={(e) =>
+                                  handleWeightChange(
+                                    img.id,
+                                    comp,
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          )
+                        )}
                       </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={img.magWeight}
-                        onChange={(e) =>
-                          handleWeightChange(img.id, e.target.value)
-                        }
-                      />
-                    </div>
-                  </div>
+                    )}
+                  </>
                 )}
               </div>
             ))}
@@ -445,7 +540,13 @@ function App() {
               <i className="fas fa-desktop"></i> Output
             </h2>
             <div style={{ marginBottom: "12px", fontSize: "12px" }}>
-              <label style={{ display: "block", marginBottom: "4px", fontWeight: "bold" }}>
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "4px",
+                  fontWeight: "bold",
+                }}
+              >
                 Mode:
               </label>
               <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
@@ -479,22 +580,31 @@ function App() {
               onStartMixing={handleStartMixing}
               onCancel={handleCancel}
             />
-            <div className="outputs-grid" style={{ marginTop: "12px" }}>
+            <div className="output-tabs">
               {outputs.map((output) => (
-                <div key={output.id} className="output-container">
-                  <div className="output-header">
-                    <span>Output {output.id + 1}</span>
-                    {output.active && <span className="active-dot"></span>}
-                  </div>
-                  <ImageViewer
-                    id={output.id}
-                    image={output.image}
-                    isOutput={true}
-                    isActive={output.active}
-                    onActivate={setActiveOutput}
-                  />
-                </div>
+                <button
+                  key={output.id}
+                  className={`output-tab ${output.active ? "active" : ""}`}
+                  onClick={() => setActiveOutput(output.id)}
+                >
+                  Output {output.id + 1}
+                </button>
               ))}
+            </div>
+            <div className="outputs-grid" style={{ marginTop: "12px" }}>
+              {outputs
+                .filter((out) => out.active)
+                .map((output) => (
+                  <div key={output.id} className="output-container">
+                    <ImageViewer
+                      id={output.id}
+                      image={output.image}
+                      isOutput={true}
+                      isActive={output.active}
+                      onActivate={setActiveOutput}
+                    />
+                  </div>
+                ))}
             </div>
           </div>
         </div>

@@ -164,44 +164,86 @@ body {
   white-space: nowrap;
 }
 
+/* Toggle Weights Button */
+.toggle-weights-btn {
+  width: 100%;
+  background: rgba(52, 152, 219, 0.15);
+  border: 1px solid rgba(52, 152, 219, 0.3);
+  color: #64b5f6;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 3px;
+  transition: all 0.2s;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.toggle-weights-btn:hover {
+  background: rgba(52, 152, 219, 0.25);
+  border-color: rgba(52, 152, 219, 0.5);
+}
+
+.toggle-weights-btn i {
+  font-size: 8px;
+}
+
 /* Weight Controls */
 .weight-controls {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 6px;
-  padding: 10px;
+  padding: 6px 8px;
   margin-top: 5px;
 }
 
 .slider-group {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .slider-group:last-child {
   margin-bottom: 0;
 }
 
-.slider-group label {
-  display: block;
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.slider-label span {
+  font-size: 9px;
   color: #bdc3c7;
-  font-size: 11px;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
 }
 
 .slider-group input[type="range"] {
   width: 100%;
-  height: 6px;
+  height: 4px;
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
+  border-radius: 2px;
   outline: none;
   -webkit-appearance: none;
 }
 
 .slider-group input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 12px;
+  height: 12px;
+  background: #3498db;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+}
+
+.slider-group input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
   background: #3498db;
   border-radius: 50%;
   cursor: pointer;
@@ -259,6 +301,38 @@ body {
   display: grid;
   grid-template-columns: 1fr;
   gap: 15px;
+}
+
+.output-tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+.output-tab {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.2);
+  border: none;
+  border-bottom: 3px solid transparent;
+  color: #90a4ae;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 0.5px;
+}
+
+.output-tab:hover {
+  background: rgba(76, 175, 80, 0.1);
+  color: #81c784;
+}
+
+.output-tab.active {
+  background: rgba(76, 175, 80, 0.15);
+  border-bottom-color: #4caf50;
+  color: #4caf50;
 }
 
 .output-container {
