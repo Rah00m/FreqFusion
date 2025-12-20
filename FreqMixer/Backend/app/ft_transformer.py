@@ -21,29 +21,33 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FTComponents:
-    """Container for Fourier Transform components.
+    """Dual-path storage with clear separation between operations and visualization.
     
-    CRITICAL: Dual storage for mathematical correctness:
-    - ft_original: unshifted DFT (for mixing operations)
-    - ft_shifted: shifted DFT (for visualization ONLY)
-    - *_raw: from ft_original (for mathematical operations)
-    - *_display: from ft_shifted (for visualization)
+    ARCHITECTURE:
+    - ft_original: Unshifted FT for mathematical operations (mixing, filtering)
+    - ft_shifted: Shifted FT for visualization ONLY (low frequencies in center)
+    - Raw components: From ft_original (for operations)
+    - Display components: From ft_shifted (for user display)
+    
+    CRITICAL: Never use ft_shifted for mathematical operations!
     """
-    ft_original: np.ndarray  # Unshifted - for operations
-    ft_shifted: np.ndarray   # Shifted - for display only
-    magnitude_display: np.ndarray
-    phase_display: np.ndarray
-    real_display: np.ndarray
-    imaginary_display: np.ndarray
-    magnitude_raw: np.ndarray  # From ft_original
-    phase_raw: np.ndarray      # From ft_original
-    real_raw: np.ndarray       # From ft_original
-    imaginary_raw: np.ndarray  # From ft_original
+    # FOR OPERATIONS (mathematical correctness)
+    ft_original: np.ndarray           # Unshifted - for mixing operations
+    magnitude_raw: np.ndarray         # From ft_original
+    phase_raw: np.ndarray             # From ft_original
+    real_raw: np.ndarray              # From ft_original
+    imaginary_raw: np.ndarray         # From ft_original
+    
+    # FOR VISUALIZATION ONLY (user display)
+    ft_shifted: np.ndarray            # Shifted - for display only
+    magnitude_display: np.ndarray     # From ft_shifted (log-scaled)
+    phase_display: np.ndarray         # From ft_shifted (normalized)
+    real_display: np.ndarray          # From ft_shifted (normalized)
+    imaginary_display: np.ndarray     # From ft_shifted (normalized)
 
     def to_dict(self) -> Dict:
         return {
-            "ft_original_shape": self.ft_original.shape,
-            "ft_shifted_shape": self.ft_shifted.shape,
+            "ft_shape": self.ft_original.shape,
             "dtype": str(self.ft_original.dtype),
             "magnitude_shape": self.magnitude_display.shape,
             "phase_shape": self.phase_display.shape,
@@ -64,6 +68,7 @@ class FTComponents:
         return mapping[key]
 
     def get_raw_component(self, name: str) -> np.ndarray:
+        """Get raw component from ft_original (for operations)"""
         mapping = {
             "magnitude": self.magnitude_raw,
             "phase": self.phase_raw,
@@ -96,8 +101,9 @@ class FourierTransformer:
         image_gray = self._ensure_grayscale(image)
         image_gray = image_gray.astype(np.float32 if self.use_float32 else np.float64)
 
-        ft_original = np.fft.fft2(image_gray)
-        ft_shifted = np.fft.fftshift(ft_original)
+        # Dual-path calculation
+        ft_original = np.fft.fft2(image_gray)  # For operations
+        ft_shifted = np.fft.fftshift(ft_original)  # For display only
 
         comps = self._extract_components(ft_original, ft_shifted)
 
@@ -117,13 +123,14 @@ class FourierTransformer:
         return image
 
     def _extract_components(self, ft_original: np.ndarray, ft_shifted: np.ndarray) -> FTComponents:
-        """Extract components from BOTH ft_original (for ops) and ft_shifted (for display).
+        """Extract components from dual paths.
         
-        CRITICAL SEPARATION:
-        - Raw components from ft_original → used for mixing operations
-        - Display components from ft_shifted → used for visualization only
+        RAW components: From ft_original (unshifted) for mathematical operations
+        DISPLAY components: From ft_shifted (centered) for visualization
+        
+        CRITICAL: Raw components are for operations, display for visualization only!
         """
-        # RAW components from ft_original (for mathematical operations)
+        # RAW components from ft_original (for mixing operations)
         magnitude_raw = np.abs(ft_original)
         phase_raw = np.angle(ft_original)
         real_raw = ft_original.real
@@ -133,24 +140,25 @@ class FourierTransformer:
         magnitude_shifted = np.abs(ft_shifted)
         phase_shifted = np.angle(ft_shifted)
         real_shifted = ft_shifted.real
-        imag_shifted = ft_shifted.imag
+        imaginary_shifted = ft_shifted.imag
         
+        # Normalize display components for visualization
         magnitude_display = self._normalize_magnitude(magnitude_shifted)
         phase_display = self._normalize_phase(phase_shifted)
         real_display = self._normalize_real_imag(real_shifted)
-        imag_display = self._normalize_real_imag(imag_shifted)
+        imag_display = self._normalize_real_imag(imaginary_shifted)
 
         return FTComponents(
             ft_original=ft_original,
+            magnitude_raw=magnitude_raw,
+            phase_raw=phase_raw,
+            real_raw=real_raw,
+            imaginary_raw=imaginary_raw,
             ft_shifted=ft_shifted,
             magnitude_display=magnitude_display,
             phase_display=phase_display,
             real_display=real_display,
             imaginary_display=imag_display,
-            magnitude_raw=magnitude_raw,
-            phase_raw=phase_raw,
-            real_raw=real_raw,
-            imaginary_raw=imaginary_raw,
         )
 
     def _normalize_magnitude(self, magnitude: np.ndarray) -> np.ndarray:
@@ -167,6 +175,34 @@ class FourierTransformer:
     def _normalize_real_imag(self, component: np.ndarray) -> np.ndarray:
         component_norm = cv2.normalize(component, None, 0, 255, cv2.NORM_MINMAX)
         return component_norm.astype(np.uint8)
+
+    def convert_rectangle_coordinates(self, rect: Dict, image_shape: Tuple[int, int]) -> Dict:
+        """Convert rectangle coordinates from shifted domain (user view) to original domain (operations).
+        
+        User draws on: ft_shifted (low frequencies in center)
+        We operate on: ft_original (low frequencies in corners)
+        
+        Conversion formula:
+        x_original = (x_shifted - width/2) % width
+        y_original = (y_shifted - height/2) % height
+        """
+        h, w = image_shape
+        
+        # Coordinates from user (drawn on ft_shifted)
+        x_shifted = rect["x"]
+        y_shifted = rect["y"]
+        
+        # Convert to ft_original domain
+        x_original = (x_shifted - w // 2) % w
+        y_original = (y_shifted - h // 2) % h
+        
+        return {
+            "x": x_original,
+            "y": y_original,
+            "width": rect["width"],
+            "height": rect["height"],
+            "type": rect["type"]
+        }
 
     def create_rect_region_mask(
         self,
@@ -223,23 +259,26 @@ class FourierTransformer:
             mask = dist > radius
         return mask
 
-    def apply_region_mask(self, ft_shifted: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    def apply_region_mask(self, ft_original: np.ndarray, mask: np.ndarray) -> np.ndarray:
         """Apply a boolean mask to an FT array; expects matching shapes."""
-        if ft_shifted.shape != mask.shape:
+        if ft_original.shape != mask.shape:
             raise ValueError("Region mask shape does not match FT shape")
-        return ft_shifted * mask
+        return ft_original * mask
 
     def mix_components(
         self,
         components_list: List[FTComponents],
-        weights: List[List[float]],  # [[w1a, w1b], ...]
+        weights: List[List[float]],
         rectangles: List[Optional[Dict]],
         component_mode: str = "magnitude_phase",
         preserve_energy: bool = False,
     ) -> Dict:
-        """Mix FT components using ft_original (not ft_shifted) for mathematical correctness.
+        """Mix FT components using ft_original with coordinate conversion.
         
-        CRITICAL: All operations use ft_original to preserve Hermitian symmetry.
+        CRITICAL: 
+        - User rectangles are in ft_shifted domain (centered)
+        - Convert to ft_original domain before applying masks
+        - All operations use ft_original for mathematical correctness
         """
         if len(components_list) != len(weights):
             raise ValueError(f"Components count {len(components_list)} != weights count {len(weights)}")
@@ -248,7 +287,6 @@ class FourierTransformer:
         if component_mode not in ("magnitude_phase", "real_imaginary"):
             raise ValueError(f"Invalid component_mode: {component_mode}")
 
-        # Use ft_original shape (unshifted) for operations
         shapes = {comp.ft_original.shape for comp in components_list}
         if len(shapes) != 1:
             raise ValueError("FT component shapes differ across images")
@@ -267,20 +305,25 @@ class FourierTransformer:
             w1, w2 = as_float_pair(pair)
 
             if component_mode == "magnitude_phase":
+                # ⭐ CRITICAL: Use raw components from ft_original
                 magnitude = comp.magnitude_raw * w1
-                phase = comp.phase_raw * w2  # ضرب خطي بدلاً من أسّ
+                phase = comp.phase_raw * w2
                 ft_component = magnitude * np.exp(1j * phase)
             else:  # real_imaginary
-                ft_component = comp.real_raw * w1 + 1j * comp.imaginary_raw * w2
+                real_scaled = comp.real_raw * w1
+                imag_scaled = comp.imaginary_raw * w2
+                ft_component = real_scaled + 1j * imag_scaled
 
             if rect is not None:
+                # ⭐ Convert rectangle from shifted domain to original domain
+                rect_converted = self.convert_rectangle_coordinates(rect, target_shape)
                 mask = self.create_rect_region_mask(
                     target_shape,
-                    int(rect.get("x", 0)),
-                    int(rect.get("y", 0)),
-                    int(rect.get("width", 0)),
-                    int(rect.get("height", 0)),
-                    rect.get("type", "inner"),
+                    int(rect_converted["x"]),
+                    int(rect_converted["y"]),
+                    int(rect_converted["width"]),
+                    int(rect_converted["height"]),
+                    rect_converted["type"],
                 )
                 ft_component = ft_component * mask.astype(np.complex128)
 
@@ -292,15 +335,18 @@ class FourierTransformer:
 
         return {"display": display_image, "raw": raw_image}
 
-    def inverse_ft(self, ft_shifted: np.ndarray, preserve_energy: bool = False) -> Tuple[np.ndarray, np.ndarray]:
-        """Inverse FFT with optional energy preservation.
-
-        Returns a tuple of (raw_float_image, display_uint8_image). When preserve_energy is
-        True, no min-max scaling is applied to the raw output; display output remains
-        normalized for visualization only.
+    def inverse_ft(self, ft_unshifted: np.ndarray, preserve_energy: bool = False) -> Tuple[np.ndarray, np.ndarray]:
+        """Inverse FFT - receives unshifted FT from mix_components.
+        
+        Args:
+            ft_unshifted: Complex FT array (from ft_original domain, not shifted)
+            preserve_energy: If True, don't scale raw output
+            
+        Returns:
+            Tuple of (raw_float_image, display_uint8_image)
         """
-        ft_original = np.fft.ifftshift(ft_shifted)
-        image_reconstructed = np.fft.ifft2(ft_original)
+        # ft_unshifted is already unshifted from mix_components
+        image_reconstructed = np.fft.ifft2(ft_unshifted)
         image_real = np.real(image_reconstructed)
 
         raw_image = image_real 
@@ -322,6 +368,10 @@ class FourierTransformer:
         total_memory = sum(
             comp.ft_original.nbytes
             + comp.ft_shifted.nbytes
+            + comp.magnitude_raw.nbytes
+            + comp.phase_raw.nbytes
+            + comp.real_raw.nbytes
+            + comp.imaginary_raw.nbytes
             + comp.magnitude_display.nbytes
             + comp.phase_display.nbytes
             + comp.real_display.nbytes

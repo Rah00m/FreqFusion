@@ -1,12 +1,12 @@
-import React from 'react'
-import './ControlPanel.css'
+import React from "react";
+import "./ControlPanel.css";
 
 const ControlPanel = ({
   loadedCount,
   commonSize,
   activeOutput,
   onLoadSamples,
-  onClearAll
+  onClearAll,
 }) => {
   return (
     <div className="control-panel">
@@ -25,10 +25,9 @@ const ControlPanel = ({
           <div>
             <div className="status-label">Common Size</div>
             <div className="status-value">
-              {commonSize 
+              {commonSize
                 ? `${commonSize.width}×${commonSize.height}`
-                : 'Not set'
-              }
+                : "Not set"}
             </div>
           </div>
         </div>
@@ -43,24 +42,8 @@ const ControlPanel = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="action-buttons">
-        <button 
-          className="btn btn-sample"
-          onClick={onLoadSamples}
-        >
-          <i className="fas fa-vial"></i> Load Samples
-        </button>
-
-        <button 
-          className="btn btn-clear"
-          onClick={onClearAll}
-          disabled={loadedCount === 0}
-        >
-          <i className="fas fa-trash-alt"></i> Clear All
-        </button>
-      </div>
     </div>
-  )
-}
+  );
+};
 
-export default ControlPanel
+export default ControlPanel;

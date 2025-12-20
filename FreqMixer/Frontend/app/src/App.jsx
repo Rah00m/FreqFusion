@@ -39,6 +39,7 @@ function App() {
   const [outputImages, setOutputImages] = useState([null, null]);
   const [activeOutput, setActiveOutput] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState(null);
   const [ftComponents, setFTComponents] = useState(
     Array(4)
@@ -46,6 +47,13 @@ function App() {
       .map(() => ({}))
   );
   const [showWeights, setShowWeights] = useState(Array(4).fill(false));
+  const [autoMixing, setAutoMixing] = useState(false);
+  const [settingsChanged, setSettingsChanged] = useState(false);
+
+  // Refs for request management
+  const abortControllerRef = React.useRef(null);
+  const mixTimeoutRef = React.useRef(null);
+  const autoMixTimeoutRef = React.useRef(null);
 
   // Effects
   const fetchAllImages = async () => {
@@ -93,6 +101,16 @@ function App() {
 
   useEffect(() => {
     fetchAllImages();
+
+    // Cleanup on unmount
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (mixTimeoutRef.current) {
+        clearTimeout(mixTimeoutRef.current);
+      }
+    };
   }, []);
 
   const fetchFTComponent = async (id, mode) => {
@@ -176,6 +194,22 @@ function App() {
           : img
       )
     );
+
+    // Mark settings as changed for real-time mixing
+    if (autoMixing) {
+      setSettingsChanged(true);
+
+      // Clear any previous auto-mix timeout
+      if (autoMixTimeoutRef.current) {
+        clearTimeout(autoMixTimeoutRef.current);
+      }
+
+      // Trigger re-mixing after a short delay to avoid too many requests
+      autoMixTimeoutRef.current = setTimeout(() => {
+        setSettingsChanged(false);
+        triggerAutoMix();
+      }, 500);
+    }
   };
 
   const handleMaskDraw = (id, rect) => {
@@ -267,21 +301,50 @@ function App() {
     }
   };
 
-  const handleStartMixing = async () => {
-    const loaded = images.filter((img) => img.image);
+  const handleCancel = () => {
+    // Cancel the current request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    // Clear the queued mixing timeout
+    if (mixTimeoutRef.current) {
+      clearTimeout(mixTimeoutRef.current);
+      mixTimeoutRef.current = null;
+    }
+    // Clear auto-mix timeout
+    if (autoMixTimeoutRef.current) {
+      clearTimeout(autoMixTimeoutRef.current);
+      autoMixTimeoutRef.current = null;
+    }
+    setLoading(false);
+    setProgress(0);
+    setAutoMixing(false);
+  };
+
+  // Helper function to prepare and execute mixing
+  const executeMixing = async (currentImages, abortSignal) => {
+    const loaded = currentImages.filter((img) => img.image);
     if (loaded.length < 4) {
       setError("Please load all 4 images before mixing");
-      return;
+      return false;
     }
+
     try {
-      setLoading(true);
       setError(null);
+      setProgress(10);
+
       // Normalize sizes on backend and calculate all FTs before mixing
       try {
         await API.resizeAll();
+        setProgress(20);
+        if (abortSignal.aborted) return false;
       } catch (_) {}
+
       try {
         await API.calculateAllFT();
+        setProgress(30);
+        if (abortSignal.aborted) return false;
       } catch (_) {}
 
       const clampRect = (rect, size) => {
@@ -336,7 +399,7 @@ function App() {
         };
       };
 
-      const rectanglesList = images.map((img) =>
+      const rectanglesList = currentImages.map((img) =>
         img.mask
           ? clampRect(
               { ...img.mask, type: img.mask.type || img.maskType || "inner" },
@@ -346,7 +409,7 @@ function App() {
       );
 
       const payload = prepareMixPayload(
-        images,
+        currentImages,
         rectanglesList,
         componentMode,
         preserveEnergy
@@ -354,7 +417,15 @@ function App() {
 
       console.log("Sending mix payload:", JSON.stringify(payload, null, 2));
 
+      setProgress(40);
+      if (abortSignal.aborted) return false;
+
+      // Perform mixing with progress simulation
       const res = await API.mixFT(payload);
+
+      if (abortSignal.aborted) return false;
+
+      setProgress(90);
       const img = toDataUrl(res?.base64);
       setMixResult({ ...res, base64: img });
       setOutputImages((prev) => {
@@ -362,11 +433,91 @@ function App() {
         next[activeOutput] = img;
         return next;
       });
+
+      setProgress(100);
+      return true;
     } catch (err) {
-      setError(err.message || "Mix failed");
-    } finally {
+      if (err.name !== "AbortError") {
+        setError(err.message || "Mix failed");
+      }
+      return false;
+    }
+  };
+
+  const performMixing = async (abortSignal) => {
+    try {
+      setLoading(true);
+      const success = await executeMixing(images, abortSignal);
+
+      if (success) {
+        // Keep 100% for a short moment then hide
+        setTimeout(() => {
+          setProgress(0);
+          setLoading(false);
+        }, 800);
+      } else {
+        setLoading(false);
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        setError(err.message || "Mix failed");
+      }
       setLoading(false);
     }
+  };
+
+  // Auto-mixing function - triggered by weight changes
+  const triggerAutoMix = async () => {
+    // Cancel any previous mixing operation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+
+    try {
+      setLoading(true);
+      const success = await executeMixing(
+        images,
+        abortControllerRef.current.signal
+      );
+
+      if (success) {
+        // Auto-hide progress after completion
+        setTimeout(() => {
+          setProgress(0);
+          setLoading(false);
+        }, 500);
+      } else {
+        setLoading(false);
+      }
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        setError(err.message || "Auto-mix failed");
+      }
+      setLoading(false);
+    }
+  };
+
+  const handleStartMixing = async () => {
+    // Enable auto-mixing mode
+    setAutoMixing(true);
+    setSettingsChanged(false);
+
+    // Cancel any previous mixing operation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Cancel any queued mixing timeout
+    if (mixTimeoutRef.current) {
+      clearTimeout(mixTimeoutRef.current);
+    }
+
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+    await performMixing(abortControllerRef.current.signal);
   };
 
   // Outputs
@@ -377,8 +528,6 @@ function App() {
   }));
 
   const processing = loading;
-  const progress = loading ? 50 : 0;
-  const handleCancel = () => {};
 
   return (
     <div className="app">
