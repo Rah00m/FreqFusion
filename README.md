@@ -177,51 +177,22 @@ The frontend lint command currently reports existing unused-variable and React h
 
 ### Default Four-Image Mixing
 
-![Fourier mixer with four uploaded images and output](src/assets/1.png)
+![Output emphasizing the second image](Frontend/app/src/assets/1.png)
 
 ### Mixing With Image 2 Emphasis
 
-![Output emphasizing the second image](src/assets/2.png)
+![Output emphasizing the second image](Frontend/app/src/assets/2.png)
 
 ### Outer Frequency Mask
 
-![Outer frequency mask applied to an image](src/assets/3.png)
+![Output emphasizing the second image](Frontend/app/src/assets/3.png)
 
 ### Inner Frequency Mask
 
-![Inner frequency mask applied to an image](src/assets/4.png)
+![Output emphasizing the second image](Frontend/app/src/assets/4.png)
 
 ### Real and Imaginary Mode
 
-![Real and imaginary component mixing output](src/assets/5.png)
+![Output emphasizing the second image](Frontend/app/src/assets/5.png)
 
-## Mathematical Notes
-
-The backend computes the unshifted 2D Fourier Transform for
-frequency-domain processing:
-
-F_i(u,v) = FFT2(I_i)
-
-The shifted spectrum is used only for visualization.
-
-For Magnitude/Phase mixing, the current implementation computes:
-
-F_mix =
-Σ_i [ w_M,i |F_i| exp(j w_P,i angle(F_i)) ]
-
-where w_M,i and w_P,i are the magnitude and phase weights.
-
-For Real/Imaginary mixing, the Fourier coefficients are weighted
-through their real and imaginary components before applying the IFFT.
-
-The reconstructed image is obtained using:
-
-I_out = Re{IFFT2(F_mix)}
-
-The displayed PNG is normalized to the 0–255 range for visualization.
-Therefore, display pixel values may differ from the raw reconstructed
-values even when the reconstruction itself is correct.
-
-Frequency masks intentionally remove selected spectral components,
-so masked reconstructions are expected to differ from the original image.
 
